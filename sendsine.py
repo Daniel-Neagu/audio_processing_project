@@ -39,11 +39,12 @@ def readbytes():
         elif(readbuffer):
             if("sinewave complete" in data):
                 print(f"playing the sinewave at freq: {freq}, duration: {duration}, fs: {fs}")
-                duration_sinewave = np.tile(sinewave, int(duration*fs*1.0/(freq*1.0)))
+                duration_sinewave = np.tile(sinewave, int(duration*freq))
                 sd.play(duration_sinewave, fs)
                 sd.wait()
-                print(f"sinewave complete")
+                print(f"sinewave_complete")
                 readbuffer=False
+                sinewave = np.array([])
             else:
                 print(f"value is {data}")
                 normdata = (int(data)/2048.0)-2

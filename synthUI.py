@@ -8,10 +8,56 @@ from PyQt5.QtGui import QPixmap, QPalette, QBrush
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtGui import QGuiApplication
 import numpy as np
+import sounddevice as sd
+import serial
+import matplotlib.pyplot as plt
+import scipy
+import sounddevice as sd
+from PyQt5.QtCore import QThread, pyqtSignal
 
 windowsize_y= 500
 windowsize_x =  500
 
+class SerialReaderThread(QThread):
+    sendmsg = pyqtSignal(str)
+    def __init__(self):
+        super().__init__()
+
+        self.std_COM = "COM5"
+        self.std_baudrate = 38400
+        self.serialPort = serial.Serial(port=self.std_COM, baudrate=self.std_baudrate, bytesize=8, timeout=2, stopbits=serial.STOPBITS_ONE)
+
+    def run(self):
+        sinewave = np.array([])
+        readbuffer=False
+        #fs = 5000
+        while 1: 
+            data = self.serialPort.readline().decode().strip()
+            #print(data)
+            if("signal" in data):
+                self.sendmsg.emit("signal")
+            if("sending_sinewave" in data):
+                # data comes in as "sinewave freq duration(s) samplingrate"
+                _,freq,duration,fs = data.split()
+                freq = int(freq)
+                duration = int(duration)
+                fs=int(fs)
+                readbuffer=True
+                print("receiving sinewave information")
+                print(f"sinewave of type freq: {freq}, duration: {duration}, fs: {fs}")
+            elif(readbuffer):
+                if("sinewave complete" in data):
+                    print(f"playing the sinewave at freq: {freq}, duration: {duration}, fs: {fs}")
+                    duration_sinewave = np.tile(sinewave, int(duration*freq))
+                    sd.play(duration_sinewave, fs)
+                    sd.wait()
+                    print(f"sinewave complete")
+                    readbuffer=False
+                    sinewave = np.array([])
+                else:
+                    print(f"value is {data}")
+                    normdata = (int(data)/2048.0)-2
+                    sinewave = np.append(sinewave, normdata)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -23,10 +69,18 @@ class MainWindow(QMainWindow):
         self.setFixedSize(QSize(windowsize_x,windowsize_y))
         
         self.setupscreen()
+
+        self.serial_thread = SerialReaderThread()
+        self.serial_thread.sendmsg.connect(self.handle_signal)
+        self.serial_thread.start()
         
+    def handle_signal(self,data):
+        self.trackfour.setStyleSheet("background-color: red;")
+        print("signal received")
 
     def setupscreen(self):
         #create a frame object to encompass the entire screen and allow us to add a layout to it
+
         self.frame = QFrame()
         self.setCentralWidget(self.frame)
 
@@ -156,6 +210,8 @@ class BackgroundWidget(QWidget):
         palette = QPalette()
         palette.setBrush(QPalette.Window, QBrush(scaled_pixmap))
         self.setPalette(palette)
+
+
 
 
 if __name__ == '__main__':
