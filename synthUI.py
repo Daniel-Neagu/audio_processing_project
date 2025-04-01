@@ -28,36 +28,140 @@ class SerialReaderThread(QThread):
         self.serialPort = serial.Serial(port=self.std_COM, baudrate=self.std_baudrate, bytesize=8, timeout=2, stopbits=serial.STOPBITS_ONE)
 
     def run(self):
-        sinewave = np.array([])
-        readbuffer=False
+        #sinewave = np.array([])
+        #bellwave = np.array([])
+        tracks = np.empty((4, 10), dtype=object)
+        for i in range(tracks.shape[0]):
+            for j in range(tracks.shape[1]):
+                tracks[i,j] = np.zeros(5000)
+        
+        track_index=0
+        index=0
+        wave = np.array([])
+        readbuffer = False
+        uploading=False
+        #readbuffer_sine=False
+        #readbuffer_bell=False
         #fs = 5000
         while 1: 
             data = self.serialPort.readline().decode().strip()
             #print(data)
-            if("signal" in data):
-                self.sendmsg.emit("signal")
-            if("sending_sinewave" in data):
-                # data comes in as "sinewave freq duration(s) samplingrate"
+            if("signal_sent" in data):
+                _,signal_directive = data.split()
+                if("go_piano"in signal_directive):
+                    self.sendmsg.emit("go_piano")
+                elif("go_bells"in signal_directive):
+                    self.sendmsg.emit("go_bells")
+                elif("go_menu"in signal_directive):
+                    self.sendmsg.emit("go_menu")
+            elif("play_tracks"in data):
+                print("\n".join(f"Element at ({i}, {j}) is None" if tracks[i, j] is None else f"Element at ({i}, {j}) has shape: {tracks[i, j].shape}" for i in range(tracks.shape[0]) for j in range(tracks.shape[1])))
+                print(data)
+                megatrack = np.sum(np.array([np.concatenate(tracks[i, :]) for i in range(tracks.shape[0]) if all(segment is not None for segment in tracks[i, :])]), axis=0)
+
+                print("playing tracks")
+        
+                sd.play(megatrack, 5000)
+                sd.wait()
+                
+                    
+            elif("record" in data):
+                print(data)
+            elif("start_uploading_track" in data):
+                print(data)
+                uploading=True
+            elif("done_uploading_track" in data):
+                print(data)
+                index=0
+                self.sendmsg.emit(f"filled {track_index}")
+                track_index = (track_index+1)%4
+                uploading=False
+                
+            elif("sending_bell" in data or "sending_sinewave" in data):
                 _,freq,duration,fs = data.split()
                 freq = int(freq)
                 duration = int(duration)
                 fs=int(fs)
                 readbuffer=True
+                if("sending_bell" in data):
+                    print("receiving bell information")
+                    print(f"bell of type freq: {freq}, duration: {duration}, fs: {fs}")
+                elif("sending_sinewave"in data):
+                    print("receiving sinewave information")
+                    print(f"sinewave of type freq: {freq}, duration: {duration}, fs: {fs}")
+            elif(readbuffer):
+                if("bell_complete" in data or "sinewave_complete" in data):
+                    if("bell_complete" in data):
+                        print(f"playing the bell at freq: {freq}, duration: {duration}, fs: {fs}")
+                    elif("sinewave_complete" in data):
+                        print(f"playing the sinewave at freq: {freq}, duration: {duration}, fs: {fs}")
+                    if(freq==0):
+                        duration_sound = np.zeros(5000)
+                    else:
+                        duration_sound = np.tile(wave,int(duration*freq))
+                    duration_sound = duration_sound[:5000]
+                    if(uploading):
+                        tracks[track_index][index] = duration_sound
+                        index+=1
+                    else:
+                        sd.play(duration_sound,fs)
+                        sd.wait()
+                    if("bell_complete"in data):
+                        print(f"bell complete")
+                    elif("sinewave_complete"in data):
+                        print(f"sinewave complete")
+                    readbuffer = False
+                    wave = np.array([])
+                else:
+                    print(f"value is {data}")
+                    normdata = (int(data)/2048.0)-2
+                    wave = np.append(wave, normdata)
+
+            '''
+            elif("sending_bell" in data):
+                _,freq,duration,fs = data.split()
+                freq = int(freq)
+                duration = int(duration)
+                fs=int(fs)
+                readbuffer_bell=True
+                print("receiving bell information")
+                print(f"bell of type freq: {freq}, duration: {duration}, fs: {fs}")
+                
+            elif(readbuffer_bell):
+                if("bell_complete"in data):
+                    print(f"playing the bell at freq: {freq}, duration: {duration}, fs: {fs}")
+                    duration_bellwave = np.tile(bellwave, int(duration*freq))
+                    sd.play(duration_bellwave,fs)
+                    sd.wait()
+                    print(f"bell complete")
+                    readbuffer_bell=False
+                    bellwave = np.array([])
+                else:
+                    print(f"value is {data}")
+                    normdata = (int(data)/2048.0)-2
+                    bellwave = np.append(bellwave, normdata)
+            elif("sending_sinewave" in data):
+                # data comes in as "sinewave freq duration(s) samplingrate"
+                _,freq,duration,fs = data.split()
+                freq = int(freq)
+                duration = int(duration)
+                fs=int(fs)
+                readbuffer_sine=True
                 print("receiving sinewave information")
                 print(f"sinewave of type freq: {freq}, duration: {duration}, fs: {fs}")
-            elif(readbuffer):
-                if("sinewave complete" in data):
+            elif(readbuffer_sine):
+                if("sinewave_complete" in data):
                     print(f"playing the sinewave at freq: {freq}, duration: {duration}, fs: {fs}")
                     duration_sinewave = np.tile(sinewave, int(duration*freq))
                     sd.play(duration_sinewave, fs)
                     sd.wait()
                     print(f"sinewave complete")
-                    readbuffer=False
+                    readbuffer_sine=False
                     sinewave = np.array([])
                 else:
                     print(f"value is {data}")
                     normdata = (int(data)/2048.0)-2
-                    sinewave = np.append(sinewave, normdata)
+                    sinewave = np.append(sinewave, normdata)'''
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -75,7 +179,22 @@ class MainWindow(QMainWindow):
         self.serial_thread.start()
         
     def handle_signal(self,data):
-        self.trackfour.setStyleSheet("background-color: red;")
+        if("go_piano" in data):
+            self.numpad.setCurrentIndex(1)
+        elif("go_menu" in data):
+            self.numpad.setCurrentIndex(0)
+        elif("go_bells" in data):
+            self.numpad.setCurrentIndex(1)
+        elif("filled" in data):
+            if("0" in data):
+                self.trackone.setStyleSheet("background-color: pink")
+            elif("1" in data):
+                self.tracktwo.setStyleSheet("background-color: pink")
+            elif("2" in data):
+                self.trackthree.setStyleSheet("background-color: pink")
+            elif("3" in data):
+                self.trackfour.setStyleSheet("background-color: pink")
+
         print("signal received")
 
     def setupscreen(self):
@@ -127,8 +246,14 @@ class MainWindow(QMainWindow):
         self.lowerlayout.setSpacing(50)
 
         #creates the numpad widget that will show an image of the numpad and cartoon images showing what the buttons' functions are/do
-        self.numpad_main = BackgroundWidget()
-        self.lowerlayout.addWidget(self.numpad_main)
+        self.numpad = QStackedWidget()
+        self.numpad_main = BackgroundWidget("numpad_main.png")
+        self.numpad_piano= BackgroundWidget("pianokeys.png")
+        self.numpad.addWidget(self.numpad_main)
+        self.numpad.addWidget(self.numpad_piano)
+
+        self.numpad.setFixedSize(150,150)
+        self.lowerlayout.addWidget(self.numpad)
 
         self.fillspace_main = white_widget()
         self.lowerlayout.addWidget(self.fillspace_main)
@@ -191,9 +316,9 @@ def create_style_dict():
     }
 
 class BackgroundWidget(QWidget):
-    def __init__(self):
+    def __init__(self, img_path="numpad_main.png"):
         super().__init__()
-        self.pixmap = QPixmap("numpad_main.png")  # Replace with your image path
+        self.pixmap = QPixmap(img_path)  # Replace with your image path
         self.setAutoFillBackground(True)  # Ensure the background is painted
         self.update_background()
     def resizeEvent(self, event):
