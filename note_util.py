@@ -58,4 +58,4 @@ def playsong(sounds):
 
 
 
-    
+playsine(duration=1,amplitude=1, frequency=440,fs=5000)
